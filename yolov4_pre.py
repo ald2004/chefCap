@@ -58,7 +58,7 @@ for xmlfile in xmlfiles:
     with PathManager.open(xmlfile) as fid:
         tree = ET.parse(fid)
         # < name > mask - cap < / name >
-        # < filename > mq28591952000113 - 065435.jpg < / filename >
+        # < filename > mqxxxxxxxx - 065435.jpg < / filename >
         filename_ = tree.find("filename").text.strip()
         width_ = tree.find("size").find("width").text.strip()
         height_ = tree.find("size").find("height").text.strip()
