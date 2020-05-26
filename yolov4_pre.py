@@ -7,18 +7,19 @@ from fvcore.common.file_io import PathManager
 
 def convert_xminymin_xcenterycenter(h, w, xmin, ymin, xmax, ymax):
     # < x_center > < y_center > < width > < height > - float values relative to width and height of image, it can  be  equal from (0.0 to 1.0]
-    dw = 1. / (h)
-    dh = 1. / (w)
-    x = (xmin + ymin) / 2.0
-    y = (xmax + ymax) / 2.0
-    w = ymin - xmin
-    h = ymax - xmax
+    dw = 1. / (float(w))
+    dh = 1. / (float(h))
+    x = (xmin + xmax) / 2.0
+
+    y = (ymin + ymax) / 2.0
+    w = xmax - xmin
+    h = ymax - ymin
     x = round(x * dw, 6)
     w = round(w * dw, 6)
     y = round(y * dh, 6)
     h = round(h * dh, 6)
-    return x, y, w, h
-    # return f'{x} {w} {y} {h}'
+    #     return x, y, w, h
+    return f'{x} {y} {w} {h}'
 
 
 def convertBack(x, y, w, h):
@@ -36,32 +37,7 @@ things_class_dict = {
     'mask-cap': 3
 }
 
-
-def main():
-    xmlfiles = glob.glob("*.xml")
-    for xmlfile in xmlfiles:
-        with PathManager.open(xmlfile) as fid:
-            tree = ET.parse(fid)
-            # < name > mask - cap < / name >
-            # < filename > mq28591952000113 - 065435.jpg < / filename >
-            filename_ = tree.find("filename").text.strip()
-            width_ = tree.find("size").find("width").text.strip()
-            height_ = tree.find("size").find("height").text.strip()
-            depth_ = tree.find("size").find("depth").text.strip()
-            for obj in tree.findall("object"):
-                oclass_ = things_class_dict[tree.find("name").text.strip()]
-                bbox = obj.find("bndbox")
-                try:
-                    bbox: str = convert_xminymin_xcenterycenter(
-                        float(bbox.find("xmin").text),
-                        float(bbox.find("ymin").text),
-                        float(bbox.find("xmax").text),
-                        float(bbox.find("ymax").text)
-                    )
-                except:
-                    pass
-
-
+  
 def unitest():
     '''
     <xmin>206.42315644383186</xmin>\n',
@@ -76,7 +52,35 @@ def unitest():
     xmin, ymin, xmax, ymax = convertBack(x, y, w, h)
     print(xmin, ymin, xmax, ymax)
 
-
-if __name__ == '__main__':
-    unitest()
+# unitest()
+xmlfiles = glob.glob("data/Annotations/*.xml")
+for xmlfile in xmlfiles:
+    with PathManager.open(xmlfile) as fid:
+        tree = ET.parse(fid)
+        # < name > mask - cap < / name >
+        # < filename > mqxxxxxxxx - 065435.jpg < / filename >
+        filename_ = tree.find("filename").text.strip()
+        width_ = tree.find("size").find("width").text.strip()
+        height_ = tree.find("size").find("height").text.strip()
+        depth_ = tree.find("size").find("depth").text.strip()
+        txtfile=filename_.split('.')[0]+'.txt'
+        with PathManager.open(os.path.join('data','txt',txtfile),mode='w') as fid:
+            for obj in tree.findall("object"):
+                oclass_ = things_class_dict[obj.find("name").text.strip()]
+                bbox = obj.find("bndbox")
+                try:
+                    bbox_: str = convert_xminymin_xcenterycenter(height_,width_,
+                        float(bbox.find("xmin").text),
+                        float(bbox.find("ymin").text),
+                        float(bbox.find("xmax").text),
+                        float(bbox.find("ymax").text)
+                    )
+                except:
+                    raise
+                fid.write(f'{oclass_} {bbox_}\n')
+#                 print(filename_,oclass_,bbox_)
+#     txtfile=filename_.split('.')[0]+'.txt'
+#     with PathManager.open(os.path.join('data','txt',txtfile),mode='w') as fid:
+#         fid.write(f'{oclass_} {bbox_}')
+#         break
 
