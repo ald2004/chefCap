@@ -1,24 +1,31 @@
 import base64
 import json
 import os
+import tempfile
 import uuid
 from io import BytesIO
+
+import cv2
 import numpy as np
-from flask import Flask, request, Response
 # tf
 import tensorflow as tf
-from tensorflow.keras.preprocessing import image
+from detectron2.config import get_cfg
+from detectron2.data import (
+    DatasetCatalog,
+    MetadataCatalog,
+)
+from detectron2.data.detection_utils import read_image
 # pytorch
 from detectron2.engine import DefaultPredictor
-from detectron2.utils.visualizer import Visualizer
-from detectron2.data import MetadataCatalog
-from detectron2.config import get_cfg
-from fvcore.common.timer import Timer
+from detectron2.utils.visualizer import ColorMode, Visualizer
+from flask import Flask, request, Response
+from tensorflow.keras.preprocessing import image
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 output_saved_model_dir = './tensorrt_dir'
 # from flask_cors import CORS
 img_size = 256
+_SMALL_OBJECT_AREA_THRESH = 1000
 app = Flask(__name__)
 
 
@@ -59,9 +66,15 @@ class kittchen(object):
         cfg.MODEL.WEIGHTS = "output/model_final.pth"
         cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = score_thres
         self.predictor = DefaultPredictor(cfg)
+        DatasetCatalog.register("chefCap", lambda d: None)
+        self.metadata = MetadataCatalog.get('chefCap')
+        self.metadata.set(thing_classes=['face-head', 'mask-head', 'face-cap', 'mask-cap'])
 
     def predict(self, img):
         return self.predictor(img)
+
+    def get_metadata(self):
+        return self.metadata
 
     def setscore_thres(self, score_thres):
         self.score_thres = score_thres
@@ -79,6 +92,131 @@ class kittchen(object):
                 # labels = ["{} {:.0f}%".format(l, s * 100) for l, s in zip(labels, scores)]
                 labels = [f"{l}" for l in labels]
         return labels
+
+
+class myx_Visualizer(Visualizer):
+    def overlay_instances(
+            self,
+            *,
+            boxes=None,
+            labels=None,
+            masks=None,
+            keypoints=None,
+            assigned_colors=None,
+            alpha=0.5
+    ):
+
+        num_instances = None
+        if boxes is not None:
+            boxes = self._convert_boxes(boxes)
+            num_instances = len(boxes)
+        if masks is not None:
+            masks = self._convert_masks(masks)
+            if num_instances:
+                assert len(masks) == num_instances
+            else:
+                num_instances = len(masks)
+        if keypoints is not None:
+            if num_instances:
+                assert len(keypoints) == num_instances
+            else:
+                num_instances = len(keypoints)
+            keypoints = self._convert_keypoints(keypoints)
+        if labels is not None:
+            assert len(labels) == num_instances
+
+        if num_instances == 0:
+            return self.output
+        if boxes is not None and boxes.shape[1] == 5:
+            return self.overlay_rotated_instances(
+                boxes=boxes, labels=labels, assigned_colors=assigned_colors
+            )
+
+        # Display in largest to smallest order to reduce occlusion.
+        areas = None
+        if boxes is not None:
+            areas = np.prod(boxes[:, 2:] - boxes[:, :2], axis=1)
+        elif masks is not None:
+            areas = np.asarray([x.area() for x in masks])
+        assigned_colors = np.array([
+            [0.667, 0.333, 1.],
+            [0.85, 0.325, 0.098],
+            [0., 0.667, 0.5],
+            [0.749, 0.749, 0.]
+        ], dtype=np.float)
+        if areas is not None:
+            sorted_idxs = np.argsort(-areas).tolist()
+            # Re-order overlapped instances in descending order.
+            boxes = boxes[sorted_idxs] if boxes is not None else None
+            labels = [labels[k] for k in sorted_idxs] if labels is not None else None
+            masks = [masks[idx] for idx in sorted_idxs] if masks is not None else None
+            # assigned_colors = [assigned_colors[idx] for idx in sorted_idxs]
+            keypoints = keypoints[sorted_idxs] if keypoints is not None else None
+
+        color_dic = {'face-head': 0, 'mask-head': 1, 'face-cap': 2, 'mask-cap': 3}
+
+        for i in range(num_instances):
+            #             color = assigned_colors[i]
+            color = assigned_colors[color_dic[labels[i].split(" ")[0]]]
+            #             print(labels[i])
+            #             mask-cap 100%
+            #             mask-cap 82%
+            #             mask-cap 76%
+            #             mask-cap 98%
+            if boxes is not None:
+                self.draw_box(boxes[i], edge_color=color)
+
+            if masks is not None:
+                for segment in masks[i].polygons:
+                    self.draw_polygon(segment.reshape(-1, 2), color, alpha=alpha)
+
+            if labels is not None:
+                # first get a box
+                if boxes is not None:
+                    x0, y0, x1, y1 = boxes[i]
+                    text_pos = (x0, y0)  # if drawing boxes, put text on the box corner.
+                    horiz_align = "left"
+                elif masks is not None:
+                    x0, y0, x1, y1 = masks[i].bbox()
+
+                    # draw text in the center (defined by median) when box is not drawn
+                    # median is less sensitive to outliers.
+                    text_pos = np.median(masks[i].mask.nonzero(), axis=1)[::-1]
+                    horiz_align = "center"
+                else:
+                    continue  # drawing the box confidence for keypoints isn't very useful.
+                # for small objects, draw text at the side to avoid occlusion
+                instance_area = (y1 - y0) * (x1 - x0)
+                if (
+                        instance_area < _SMALL_OBJECT_AREA_THRESH * self.output.scale
+                        or y1 - y0 < 40 * self.output.scale
+                ):
+                    if y1 >= self.output.height - 5:
+                        text_pos = (x1, y0)
+                    else:
+                        text_pos = (x0, y1)
+
+                height_ratio = (y1 - y0) / np.sqrt(self.output.height * self.output.width)
+                lighter_color = self._change_color_brightness(color, brightness_factor=0.7)
+                font_size = (
+                        np.clip((height_ratio - 0.02) / 0.08 + 1, 1.2, 2)
+                        * 0.5
+                        * self._default_font_size
+                )
+                self.draw_text(
+                    labels[i],
+                    text_pos,
+                    color=lighter_color,
+                    horizontal_alignment=horiz_align,
+                    font_size=font_size,
+                )
+
+        # draw keypoints
+        if keypoints is not None:
+            for keypoints_per_instance in keypoints:
+                self.draw_and_connect_keypoints(keypoints_per_instance)
+
+        return self.output
 
 
 # Testing URL
@@ -138,12 +276,27 @@ def hello_world():
 
 @app.route('/kitchen', methods=['POST'])
 def kitchen():
+    def cvDrawBoxes_voc(detections, img):
+        for detection in detections:
+            xmin, ymin, xmax, ymax = int(round(detection[0])), \
+                                     int(round(detection[1])), \
+                                     int(round(detection[2])), \
+                                     int(round(detection[3]))
+            pt1 = (xmin, ymin)
+            pt2 = (xmax, ymax)
+            cv2.rectangle(img, pt1, pt2, (255, 0, 0), 1)
+        return img
+
     requestdata = request.json.get("IMG_BASE64")
     score_thres = request.json.get("SCORE_THRES", 0.7)
+    img_back = request.json.get("IMG_BACK", False)
+    # print(img_back,type(img_back))
     kittchen_pri.setscore_thres(score_thres)
     kitchen_img = image.img_to_array(image.load_img(BytesIO(base64.b64decode(requestdata))), dtype=np.uint8)  # / 255.
+
     Errors = 0
     instance = None
+    b64_image = ''
     items = []
     try:
         instance = kittchen_pri.predict(kitchen_img)["instances"].to("cpu")
@@ -155,11 +308,24 @@ def kitchen():
         #         [770.3798, 404.8280, 808.1330, 456.0722]])
         scores = fields['scores']  # tensor([0.9970, 0.9778, 0.9586, 0.9293])
         pred_classes = fields['pred_classes']  # tensor([3, 3, 3, 1])
-        labels = kittchen_pri._create_text_labels(pred_classes, scores)
+        if not img_back:
+            labels = kittchen_pri._create_text_labels(pred_classes, scores)
+        else:
+            labels = list(['face-head', 'mask-head', 'face-cap', 'mask-cap'][x] for x in pred_classes.numpy())
         for i in range(len(instance)):
             if kittchen_pri.score_thres <= scores[i].item():
                 items.append(
                     dict(zip(['box', 'class', 'score'], [pred_boxes[i].tolist(), labels[i], scores[i].item()])))
+        if img_back:
+            vlz = myx_Visualizer(kitchen_img, kittchen_pri.get_metadata(), instance_mode=1)
+            vout = vlz.draw_instance_predictions(predictions=instance)
+            back_img = vout.get_image()
+        else:
+            back_img = np.empty((2, 2, 3))
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            cv2.imwrite(tmpdirname + 'xx.jpg', back_img)
+            with open(tmpdirname + 'xx.jpg', "rb") as imageFile:
+                b64_image = base64.b64encode(imageFile.read())
     except:
         Errors = 1
         raise
@@ -167,7 +333,8 @@ def kitchen():
         {
             "Nums": len(items) if not Errors else 0,
             "Items": items,
-            "Errors": Errors
+            "Errors": Errors,
+            "IMG_BACK": b64_image.decode('utf-8'),
         }
     }
     return Response(json.dumps(ret, ensure_ascii=False), mimetype='application/json')
@@ -177,5 +344,4 @@ pridictor = beauty(output_saved_model_dir)
 kittchen_pri = kittchen(0.7)
 app.run(debug=True, port=5000, host='10.1.202.11')
 
-# FLASK_APP=api_server.py FLASK_ENV=development python api_server.py
-
+# FLASK_APP=api_server.py FLASK_ENV=development;python api_server.py
