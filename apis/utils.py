@@ -1,9 +1,12 @@
 # Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
 import base64
 import functools
+# from utils import setup_logger
+# from utils import YOLO_single_img
 import logging
 import os
 import sys
+import time
 import warnings
 
 import cv2
@@ -13,6 +16,8 @@ import numpy as np
 from detectron2.utils.visualizer import Visualizer
 from fvcore.common.file_io import PathManager
 from termcolor import colored
+
+import darknet
 
 try:
     from PIL import ImageEnhance
@@ -36,6 +41,10 @@ if pil_image is not None:
     if hasattr(pil_image, 'LANCZOS'):
         _PIL_INTERPOLATION_METHODS['lanczos'] = pil_image.LANCZOS
 _SMALL_OBJECT_AREA_THRESH = 1000
+HAS_GPU = False
+darknet.hasGPU = HAS_GPU
+if HAS_GPU:
+    from darknet import set_gpu
 
 
 class _ColorfulFormatter(logging.Formatter):
@@ -67,7 +76,7 @@ def _cached_log_stream(filename):
 
 @functools.lru_cache()  # so that calling setup_logger multiple times won't add many handlers
 def setup_logger(
-        output=None, distributed_rank=0, *, color=True, name="detectron2", abbrev_name=None
+        output=None, distributed_rank=0, *, color=True, name="chefCap", abbrev_name=None, log_level=logging.DEBUG
 ):
     """
     Initialize the detectron2 logger and set its verbosity level to "DEBUG".
@@ -86,14 +95,14 @@ def setup_logger(
         logging.Logger: a logger
     """
     logger = logging.getLogger(name)
-    logger.setLevel(logging.DEBUG)
+    logger.setLevel(log_level)
     logger.propagate = False
 
     if abbrev_name is None:
         abbrev_name = "d2" if name == "detectron2" else name
 
     plain_formatter = logging.Formatter(
-        "[%(asctime)s] %(name)s %(levelname)s: %(message)s", datefmt="%m/%d %H:%M:%S"
+        "[%(asctime)s] %(threadName)-9s %(name)s %(levelname)s: %(message)s", datefmt="%m/%d %H:%M:%S"
     )
     # stdout logging: master only
     if distributed_rank == 0:
@@ -101,7 +110,7 @@ def setup_logger(
         ch.setLevel(logging.DEBUG)
         if color:
             formatter = _ColorfulFormatter(
-                colored("[%(asctime)s %(name)s]: ", "green") + "%(message)s",
+                colored("[%(asctime)s %(threadName)-9s %(name)s]: ", "green") + "%(message)s",
                 datefmt="%m/%d %H:%M:%S",
                 root_name=name,
                 abbrev_name=str(abbrev_name),
@@ -269,7 +278,9 @@ class myx_Visualizer(Visualizer):
             [0.667, 0.333, 1.],
             [0.85, 0.325, 0.098],
             [0., 0.667, 0.5],
-            [0.749, 0.749, 0.]
+            [0.749, 0.749, 0.],
+            [0.333, 0.667, 0.000],
+            [0.000, 0.667, 0.500]
         ], dtype=np.float)
         if areas is not None:
             sorted_idxs = np.argsort(-areas).tolist()
@@ -280,7 +291,7 @@ class myx_Visualizer(Visualizer):
             # assigned_colors = [assigned_colors[idx] for idx in sorted_idxs]
             keypoints = keypoints[sorted_idxs] if keypoints is not None else None
 
-        color_dic = {'face-head': 0, 'mask-head': 1, 'face-cap': 2, 'mask-cap': 3}
+        color_dic = {'face-head': 0, 'mask-head': 1, 'face-cap': 2, 'mask-cap': 3, 'uniform': 4, 'non-uniform': 5}
 
         for i in range(num_instances):
             #             color = assigned_colors[i]
@@ -376,3 +387,74 @@ def convertBack(detection):
     ymin = int(round(y - (h / 2)))
     ymax = int(round(y + (h / 2)))
     return xmin, ymin, xmax, ymax
+
+
+class YOLO_single_img():
+    def __init__(self, configPath="cfg/yolo-obj.cfg", weightPath="weights/yolo-obj_final.weights",
+                 metaPath="cfg/obj.data",
+                 gpu_id=1):
+
+        self.metaMain, self.netMain, self.altNames, self.dark = None, None, None, darknet
+        # self.logger = setup_logger(log_level=logging.CRITICAL)
+        if HAS_GPU:
+            set_gpu(gpu_id)
+        if not os.path.exists(configPath):
+            raise ValueError("Invalid config path `" +
+                             os.path.abspath(configPath) + "`")
+        if not os.path.exists(weightPath):
+            raise ValueError("Invalid weight path `" +
+                             os.path.abspath(weightPath) + "`")
+        if not os.path.exists(metaPath):
+            raise ValueError("Invalid data file path `" +
+                             os.path.abspath(metaPath) + "`")
+        if self.netMain is None:
+            self.netMain = darknet.load_net_custom(configPath.encode(
+                "ascii"), weightPath.encode("ascii"), 0, 1)  # batch size = 1
+        if self.metaMain is None:
+            self.metaMain = darknet.load_meta(metaPath.encode("ascii"))
+        if self.altNames is None:
+            try:
+                with open(metaPath) as metaFH:
+                    metaContents = metaFH.read()
+                    import re
+                    match = re.search("names *= *(.*)$", metaContents,
+                                      re.IGNORECASE | re.MULTILINE)
+                    if match:
+                        result = match.group(1)
+                    else:
+                        result = None
+                    try:
+                        if os.path.exists(result):
+                            with open(result) as namesFH:
+                                namesList = namesFH.read().strip().split("\n")
+                                self.altNames = [x.strip() for x in namesList]
+                    except TypeError:
+                        pass
+            except Exception:
+                pass
+        self.size = (self.dark.network_width(self.netMain),
+                     self.dark.network_height(self.netMain))
+        self._seconds = 0
+
+    def darkdetect(self, image_src):
+        darknet_image = self.dark.make_image(self.dark.network_width(self.netMain),
+                                             self.dark.network_height(self.netMain), 3)
+
+        try:
+            # frame_rgb = cv2.cvtColor(image_src, cv2.COLOR_BGR2RGB)
+            frame_resized = cv2.resize(image_src, self.size, interpolation=cv2.INTER_LINEAR)
+            # self.logger.info(frame_resized.shape)
+            self.dark.copy_image_from_bytes(darknet_image, frame_resized.tobytes())
+            detections = self.dark.detect_image(self.netMain, self.metaMain, darknet_image, thresh=0.25)
+            # self.logger.info(detections)
+            return detections, frame_resized
+        except:
+            raise
+
+    def getsize(self):
+        return self.size
+
+
+# logger = setup_logger(log_level=logging.CRITICAL)
+# yoyo = YOLO_single_img(configPath="cfg/chefCap.cfg", weightPath="cfg/chefCap_3000.weights", metaPath="cfg/chefCap.data")
+thirteentimestamp = lambda: int(round(time.time() * 1e3))
