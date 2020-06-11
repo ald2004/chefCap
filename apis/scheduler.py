@@ -36,7 +36,8 @@ yoyo = YOLO_single_img(configPath="cfg/chefCap.cfg", weightPath="cfg/chefCap_110
 API_ENDPOINT = "http://10.1.198.6:5123/querySyncVidelStream"
 API_ENDPOINT_SEND = "http://10.1.198.6:9906/asiainfoAI/streamingResults"
 thing_classes = ['face-head', 'mask-head', 'face-cap', 'mask-cap', 'uniform', 'non-uniform']
-WHERE_TO_UPLOAD_TO = '/home/puaiuc/images/analysisImgs'
+#WHERE_TO_UPLOAD_TO = '/home/puaiuc/images/analysisImgs'
+WHERE_TO_UPLOAD_TO = '/home/nginx/images/analysisImgs'
 last_check_table = {"mq289vcee5000015": 0}
 
 
@@ -75,10 +76,10 @@ def upload(back_img):
 
 def do_detect_upload(rtmpurl: str):
     try:
-        # cap = cv2.VideoCapture(rtmpurl)
-        import random
-        cap = cv2.VideoCapture("logs/video/mq17cc36c1000440-20200608182458.mp4")
-        cap.set(1, random.choice(range(int(float(cap.get(cv2.CAP_PROP_FRAME_COUNT))))))  # Out[5]: 108181.0
+        cap = cv2.VideoCapture(rtmpurl)
+        # import random
+        # cap = cv2.VideoCapture("logs/video/mq17cc36c1000440-20200608182458.mp4")
+        # cap.set(1, random.choice(range(int(float(cap.get(cv2.CAP_PROP_FRAME_COUNT))))))  # Out[5]: 108181.0
         # frameRate = int(np.floor(cap.get(cv2.CAP_PROP_FPS)))
         # frameRate = frameRate if frameRate else 20
         # count = 0
@@ -90,7 +91,7 @@ def do_detect_upload(rtmpurl: str):
         ret, frame_read = cap.read()
         if not ret:
             logger.debug("ret is not...")
-            return None
+            return None, None
         tt = Timer()
         predicts, kitchen_img_resized = yoyo.darkdetect(frame_read)
         tt.pause()
@@ -121,7 +122,7 @@ def grab_and_analysis(deviceSn: str, rtmpurl: str, frameTime: str) -> dict:
     logger.debug(f'+++++++++++++++ Starting grab {deviceSn} after {secs} while thres {frameTime}+++++++++++++++')
     if secs:
         if secs >= int(float(frameTime)):
-            # if secs >= 1:
+        # if secs >= 1:
             last_check_table[deviceSn] = 0
             predicts, uploadedurl = do_detect_upload(rtmpurl)
             logger.debug(
