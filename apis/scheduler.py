@@ -1,31 +1,25 @@
-import base64
-import requests
+import functools
 import json
+import logging
+import os
+import tempfile
 import threading
 import time
-import logging
-import functools
-from utils import (
-    setup_logger, YOLO_single_img, myx_Visualizer, convertBack, thirteentimestamp)
-from datetime import datetime, timezone
-import pytz
-import pysftp
-import tempfile
-import cv2
-from ctypes import *
-import math
-import random
-import os, sys
+import traceback
+import uuid
+from datetime import datetime
+
 import cv2
 import numpy as np
-import glob
-from fvcore.common.timer import Timer
-from tqdm import tqdm
-import uuid
-import traceback
+import pysftp
+import pytz
+import requests
 from detectron2.structures import Instances
-import threading, time
 from detectron2.utils import comm
+from fvcore.common.timer import Timer
+
+from utils import (
+    setup_logger, YOLO_single_img, myx_Visualizer, convertBack, thirteentimestamp)
 
 logger = setup_logger(log_level=logging.DEBUG)
 # yoyo = YOLO_single_img(configPath="cfg/chefCap.cfg", weightPath="cfg/chefCap_3000.weights", metaPath="cfg/chefCap.data")
@@ -36,9 +30,9 @@ yoyo = YOLO_single_img(configPath="cfg/chefCap.cfg", weightPath="cfg/chefCap_110
 API_ENDPOINT = "http://10.1.198.6:5123/querySyncVidelStream"
 API_ENDPOINT_SEND = "http://10.1.198.6:9906/asiainfoAI/streamingResults"
 thing_classes = ['face-head', 'mask-head', 'face-cap', 'mask-cap', 'uniform', 'non-uniform']
-#WHERE_TO_UPLOAD_TO = '/home/puaiuc/images/analysisImgs'
+# WHERE_TO_UPLOAD_TO = '/home/puaiuc/images/analysisImgs'
 WHERE_TO_UPLOAD_TO = '/home/nginx/images/analysisImgs'
-last_check_table = {"mq289vcee5000015": 0}
+last_check_table = {"mq289vcee5000015": 600}
 
 
 def add_time():
@@ -74,7 +68,7 @@ def upload(back_img):
         return None
 
 
-def do_detect_upload(rtmpurl: str):
+def do_detect_upload(rtmpurl: str, analysisType='1|2|3'):
     try:
         cap = cv2.VideoCapture(rtmpurl)
         # import random
@@ -84,16 +78,33 @@ def do_detect_upload(rtmpurl: str):
         # frameRate = frameRate if frameRate else 20
         # count = 0
         logger.debug(f'start det {rtmpurl} ...')
-        cap.set(3, yoyo.getsize()[0])  # w
-        cap.set(4, yoyo.getsize()[1])  # h
+        # cap.set(3, yoyo.getsize()[0])  # w
+        # cap.set(4, yoyo.getsize()[1])  # h
         # while True:
         # prev_time.reset()
         ret, frame_read = cap.read()
         if not ret:
             logger.debug("ret is not...")
+            cap.release()
             return None, None
         tt = Timer()
         predicts, kitchen_img_resized = yoyo.darkdetect(frame_read)
+        # ('uniform', 0.9847872257232666, (226.92221069335938, 266.7281188964844, 87.1346435546875, 198.78860473632812))
+        analysisType_predicts = []
+        for xx in analysisType.split('|'):
+            if xx == '1':
+                for yy in predicts:
+                    if yy[0] in ['face-head', 'face-cap', 'mask-cap']:
+                        analysisType_predicts.append(yy)
+            elif xx == '2':
+                for yy in predicts:
+                    if yy[0] in ['face-head', 'mask-cap', 'mask-head']:
+                        analysisType_predicts.append(yy)
+            elif xx == '3':
+                for yy in predicts:
+                    if yy[0] in ['non-uniform', 'uniform']:
+                        analysisType_predicts.append(yy)
+        predicts = analysisType_predicts
         tt.pause()
         logger.info(f'************** one shot detect time is {tt.seconds()} **************')
         vlz = myx_Visualizer(kitchen_img_resized, {"thing_classes": thing_classes}, instance_mode=1)
@@ -108,73 +119,100 @@ def do_detect_upload(rtmpurl: str):
         logger.debug(instance)
         # count += frameRate
         # cap.set(1, count)
+        cap.release()
+        logger.debug(f'end det {rtmpurl} ...')
         return predicts, upload(kitchen_img_resized)
     except:
         logger.error(traceback.format_exc())
         logger.error(exec)
+        logger.debug(f'end det {rtmpurl} with errors...')
+        cap.release()
         return None, None
-    logger.debug(f'end det {rtmpurl} ...')
-    cap.release()
 
 
-def grab_and_analysis(deviceSn: str, rtmpurl: str, frameTime: str) -> dict:
+def grab_and_analysis(deviceSn: str, rtmpurl: str, frameTime: str, analysisType='1|2|3') -> dict:
     secs = last_check_table.get(deviceSn)
     logger.debug(f'+++++++++++++++ Starting grab {deviceSn} after {secs} while thres {frameTime}+++++++++++++++')
     if secs:
         if secs >= int(float(frameTime)):
-        # if secs >= 1:
-            last_check_table[deviceSn] = 0
-            predicts, uploadedurl = do_detect_upload(rtmpurl)
+            # if secs >= 60:
+            predicts, uploadedurl = do_detect_upload(rtmpurl, analysisType)
             logger.debug(
                 f'+++++++++++++++ return from do_detect_upload [{predicts}] and [{uploadedurl}]+++++++++++++++ ')
+            if predicts is None or uploadedurl is None:
+                return None
+            last_check_table[deviceSn] = 0
             if not predicts or not uploadedurl:
                 return {}
 
             if predicts and uploadedurl:
                 analysisResult_list_one = []
                 analysisResult_list_two = []
+                analysisResult_list_three = []
                 yy_one = {
                     "analysisType": "1",
-                    "imgUrl": f'http://10.1.198.6:18090/images/analysisImgs/{uploadedurl}',
-                    # http://10.1.198.6:18090/images/analysisImgs/xxx.jpg?
+                    "imgUrl": f'http://10.1.198.6:18090/analysisImgs/{uploadedurl}',
+                    # http://10.1.198.6:18090/analysisImgs/xxx.jpg?
                     "analysisResult": analysisResult_list_one
                 }
                 yy_two = {
                     "analysisType": "2",
-                    "imgUrl": f'http://10.1.198.6:18090/images/analysisImgs/{uploadedurl}',
+                    "imgUrl": f'http://10.1.198.6:18090/analysisImgs/{uploadedurl}',
                     "analysisResult": analysisResult_list_two
                 }
+                yy_three = {
+                    "analysisType": "3",
+                    "imgUrl": f'http://10.1.198.6:18090/analysisImgs/{uploadedurl}',
+                    "analysisResult": analysisResult_list_three
+                }
                 for i in predicts:
-                    if i[0] in ['face-head', 'mask-head', 'face-cap', 'mask-cap']:
+                    if i[0] in ['face-head', 'face-cap', 'mask-cap']:
                         analysisResult_list_one.append({
                             "score": f"{i[1]}",
                             "xmin": f"{i[2][0]}",
                             "ymin": f"{i[2][1]}",
                             "xmax": f"{i[2][2]}",
                             "ymax": f"{i[2][3]}",
-                            "flag": "0"
+                            "flag": "0" if i[0] == ['face-head'] else "1"
+
                         })
-                    elif i[0] in ['uniform', 'non-uniform']:
+                    if i[0] in ['face-head', 'mask-cap', 'mask-head']:
                         analysisResult_list_two.append({
                             "score": f"{i[1]}",
                             "xmin": f"{i[2][0]}",
                             "ymin": f"{i[2][1]}",
                             "xmax": f"{i[2][2]}",
                             "ymax": f"{i[2][3]}",
-                            "flag": "1"
+                            "flag": "0" if i[0] == ['face-head'] else "1"
                         })
-
+                    if i[0] in ['non-uniform', 'uniform']:
+                        analysisResult_list_three.append({
+                            "score": f"{i[1]}",
+                            "xmin": f"{i[2][0]}",
+                            "ymin": f"{i[2][1]}",
+                            "xmax": f"{i[2][2]}",
+                            "ymax": f"{i[2][3]}",
+                            "flag": "0" if i[0] == ['non-uniform'] else "1"
+                        })
+                final_result = []
+                for x in analysisType.split('|'):
+                    if x == '1':
+                        final_result.append(yy_one)
+                    elif x == '2':
+                        final_result.append(yy_two)
+                    elif x == '3':
+                        final_result.append(yy_three)
                 return {"timeStamp": thirteentimestamp(),
                         "deviceSn": f"{deviceSn}",
-                        "result": [yy_one, yy_two],
+                        "result": final_result,
                         }
         else:
             return {}
     else:
-        last_check_table[deviceSn] = 0
+        last_check_table[deviceSn] = 600
 
 
-@functools.lru_cache()
+@functools.lru_cache(maxsize=10)
 def querySyncVidelStream() -> dict:
     r = requests.get(url=API_ENDPOINT)
     return json.loads(r.text)
@@ -193,7 +231,7 @@ def d():
                     tz=pytz.timezone('Asia/Shanghai')).hour < end_hour):
                 continue
             else:
-                result_dict = grab_and_analysis(deviceSn, rtmpUrl, frameTime)
+                result_dict = grab_and_analysis(deviceSn, rtmpUrl, frameTime, analysisType=analysisType)
                 if result_dict:
                     logger.debug(f'+++++++++++++++ {result_dict} +++++++++++++++')
                     r = requests.post(url=API_ENDPOINT_SEND, json=result_dict)
