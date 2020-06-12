@@ -19,11 +19,17 @@ from detectron2.utils import comm
 from fvcore.common.timer import Timer
 
 from utils import (
-    setup_logger, YOLO_single_img, myx_Visualizer, convertBack, thirteentimestamp)
+    setup_logger,
+    YOLO_single_img,
+    myx_Visualizer,
+    convertBack,
+    thirteentimestamp,
+    kill_duplicate_by_score
+)
 
 logger = setup_logger(log_level=logging.DEBUG)
 # yoyo = YOLO_single_img(configPath="cfg/chefCap.cfg", weightPath="cfg/chefCap_3000.weights", metaPath="cfg/chefCap.data")
-yoyo = YOLO_single_img(configPath="cfg/chefCap.cfg", weightPath="cfg/chefCap_11000.weights",
+yoyo = YOLO_single_img(configPath="cfg/chefCap.cfg", weightPath="cfg/chefCap_21000.weights",
                        metaPath="cfg/chefCap.data")
 # yoyo = YOLO_single_img(configPath="cfg/chefCap.cfg", weightPath="cfg/chefCap_12000.weights", metaPath="cfg/chefCap.data")
 # yoyo = YOLO_single_img(configPath="cfg/chefCap.cfg", weightPath="cfg/chefCap_final.weights", metaPath="cfg/chefCap.data")
@@ -104,7 +110,7 @@ def do_detect_upload(rtmpurl: str, analysisType='1|2|3'):
                 for yy in predicts:
                     if yy[0] in ['non-uniform', 'uniform']:
                         analysisType_predicts.append(yy)
-        predicts = analysisType_predicts
+        predicts = kill_duplicate_by_score(analysisType_predicts)
         tt.pause()
         logger.info(f'************** one shot detect time is {tt.seconds()} **************')
         vlz = myx_Visualizer(kitchen_img_resized, {"thing_classes": thing_classes}, instance_mode=1)
@@ -212,7 +218,7 @@ def grab_and_analysis(deviceSn: str, rtmpurl: str, frameTime: str, analysisType=
         last_check_table[deviceSn] = 600
 
 
-@functools.lru_cache(maxsize=10)
+# @functools.lru_cache(maxsize=10)
 def querySyncVidelStream() -> dict:
     r = requests.get(url=API_ENDPOINT)
     return json.loads(r.text)

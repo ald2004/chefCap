@@ -16,7 +16,7 @@ import numpy as np
 from detectron2.utils.visualizer import Visualizer
 from fvcore.common.file_io import PathManager
 from termcolor import colored
-
+import matplotlib.colors as mplc
 import darknet
 
 try:
@@ -274,14 +274,21 @@ class myx_Visualizer(Visualizer):
             areas = np.prod(boxes[:, 2:] - boxes[:, :2], axis=1)
         elif masks is not None:
             areas = np.asarray([x.area() for x in masks])
-        assigned_colors = np.array([
-            [0.667, 0.333, 1.],
-            [0.85, 0.325, 0.098],
-            [0., 0.667, 0.5],
-            [0.749, 0.749, 0.],
-            [0.333, 0.667, 0.000],
-            [0.000, 0.667, 0.500]
-        ], dtype=np.float)
+        # assigned_colors = np.array([  # RGB
+        #     # [0.667, 0.333, 1.],
+        #     # [0.85, 0.325, 0.098],
+        #     # [0., 0.667, 0.5],
+        #     # [0.749, 0.749, 0.],
+        #     # [0.333, 0.667, 0.000],
+        #     # [0.000, 0.667, 0.500]
+        #     [0.333, 0.667, 0.000],
+        #     [0.92941176, 0.02745098, 0.05098039],
+        #     [0.92941176, 0.02745098, 0.05098039],
+        #     [0.92941176, 0.02745098, 0.05098039],
+        #     [0.333, 0.667, 0.000],
+        #     [0.333, 0.667, 0.000],
+        #     [0.92941176, 0.02745098, 0.05098039]
+        # ], dtype=np.float)
         if areas is not None:
             sorted_idxs = np.argsort(-areas).tolist()
             # Re-order overlapped instances in descending order.
@@ -290,12 +297,26 @@ class myx_Visualizer(Visualizer):
             masks = [masks[idx] for idx in sorted_idxs] if masks is not None else None
             # assigned_colors = [assigned_colors[idx] for idx in sorted_idxs]
             keypoints = keypoints[sorted_idxs] if keypoints is not None else None
-
-        color_dic = {'face-head': 0, 'mask-head': 1, 'face-cap': 2, 'mask-cap': 3, 'uniform': 4, 'non-uniform': 5}
+        COLOR_RED = np.array([0.05098039, 0.02745098, 0.92941176])
+        COLOR_GREED = np.array([0.000, 0.767, 0.133])
+        color_dic = {'face-head': COLOR_RED,
+                     'mask-head': COLOR_RED,
+                     'face-cap': COLOR_RED,
+                     'mask-cap': COLOR_GREED,
+                     'uniform': COLOR_GREED,
+                     'non-uniform': COLOR_RED}
 
         for i in range(num_instances):
-            #             color = assigned_colors[i]
-            color = assigned_colors[color_dic[labels[i].split(" ")[0]]]
+            cheflable = labels[i].split(" ")[0]
+            color = np.array(color_dic[cheflable])
+            # print("++++++++++++++++++++++++++++++++++++++++++++++++++++")
+            # print(color, cheflable)
+            # ERROR [06/12 11:46:28 daemon    chefCap]: ++++++++++++++++++++++++++++++++++++++++++++++++++++
+            # ERROR [06/12 11:46:28 daemon    chefCap]: [0.749 0.749 0.   ]
+            # ERROR [06/12 11:46:28 daemon    chefCap]: mask-cap
+            # logger.critical("++++++++++++++++++++++++++++++++++++++++++++++++++++")
+            # logger.critical(color)
+            # logger.critical(labels[i].split(" ")[0])
             #             print(labels[i])
             #             mask-cap 100%
             #             mask-cap 82%
@@ -304,9 +325,9 @@ class myx_Visualizer(Visualizer):
             if boxes is not None:
                 self.draw_box(boxes[i], edge_color=color)
 
-            if masks is not None:
-                for segment in masks[i].polygons:
-                    self.draw_polygon(segment.reshape(-1, 2), color, alpha=alpha)
+            # if masks is not None:
+            #     for segment in masks[i].polygons:
+            #         self.draw_polygon(segment.reshape(-1, 2), color, alpha=alpha)
 
             if labels is not None:
                 # first get a box
@@ -314,13 +335,13 @@ class myx_Visualizer(Visualizer):
                     x0, y0, x1, y1 = boxes[i]
                     text_pos = (x0, y0)  # if drawing boxes, put text on the box corner.
                     horiz_align = "left"
-                elif masks is not None:
-                    x0, y0, x1, y1 = masks[i].bbox()
-
-                    # draw text in the center (defined by median) when box is not drawn
-                    # median is less sensitive to outliers.
-                    text_pos = np.median(masks[i].mask.nonzero(), axis=1)[::-1]
-                    horiz_align = "center"
+                # elif masks is not None:
+                #     x0, y0, x1, y1 = masks[i].bbox()
+                #
+                #     # draw text in the center (defined by median) when box is not drawn
+                #     # median is less sensitive to outliers.
+                #     text_pos = np.median(masks[i].mask.nonzero(), axis=1)[::-1]
+                #     horiz_align = "center"
                 else:
                     continue  # drawing the box confidence for keypoints isn't very useful.
                 # for small objects, draw text at the side to avoid occlusion
@@ -335,7 +356,7 @@ class myx_Visualizer(Visualizer):
                         text_pos = (x0, y1)
 
                 height_ratio = (y1 - y0) / np.sqrt(self.output.height * self.output.width)
-                lighter_color = self._change_color_brightness(color, brightness_factor=0.7)
+                # lighter_color = self._change_color_brightness(color, brightness_factor=0.7)
                 font_size = (
                         np.clip((height_ratio - 0.02) / 0.08 + 1, 1.2, 2)
                         * 0.5
@@ -344,16 +365,63 @@ class myx_Visualizer(Visualizer):
                 self.draw_text(
                     labels[i],
                     text_pos,
-                    color=lighter_color,
+                    color=color,
                     horizontal_alignment=horiz_align,
                     font_size=font_size,
                 )
 
         # draw keypoints
-        if keypoints is not None:
-            for keypoints_per_instance in keypoints:
-                self.draw_and_connect_keypoints(keypoints_per_instance)
+        # if keypoints is not None:
+        #     for keypoints_per_instance in keypoints:
+        #         self.draw_and_connect_keypoints(keypoints_per_instance)
 
+        return self.output
+
+    def draw_text(
+            self,
+            text,
+            position,
+            *,
+            font_size=None,
+            color="g",
+            horizontal_alignment="center",
+            rotation=0
+    ):
+        """
+        Args:
+            text (str): class label
+            position (tuple): a tuple of the x and y coordinates to place text on image.
+            font_size (int, optional): font of the text. If not provided, a font size
+                proportional to the image width is calculated and used.
+            color: color of the text. Refer to `matplotlib.colors` for full list
+                of formats that are accepted.
+            horizontal_alignment (str): see `matplotlib.text.Text`
+            rotation: rotation angle in degrees CCW
+
+        Returns:
+            output (VisImage): image object with text drawn.
+        """
+        if not font_size:
+            font_size = self._default_font_size
+
+        # since the text background is dark, we don't want the text to be dark
+        # color = np.maximum(list(mplc.to_rgb(color)), 0.2)
+        # color[np.argmax(color)] = max(0.8, np.max(color))
+
+        x, y = position
+        self.output.ax.text(
+            x,
+            y,
+            text,
+            size=font_size * self.output.scale,
+            family="sans-serif",
+            bbox={"facecolor": "black", "alpha": 0.8, "pad": 0.7, "edgecolor": "none"},
+            verticalalignment="top",
+            horizontalalignment=horizontal_alignment,
+            color=color,
+            zorder=10,
+            rotation=rotation,
+        )
         return self.output
 
 
@@ -458,3 +526,37 @@ class YOLO_single_img():
 # logger = setup_logger(log_level=logging.CRITICAL)
 # yoyo = YOLO_single_img(configPath="cfg/chefCap.cfg", weightPath="cfg/chefCap_3000.weights", metaPath="cfg/chefCap.data")
 thirteentimestamp = lambda: int(round(time.time() * 1e3))
+
+
+def kill_duplicate_by_score(prediction):
+    from itertools import combinations
+    def bb_intersection_over_union(boxA, boxB):
+        boxA = (boxA[0], boxA[1], boxA[0] + boxA[2], boxA[3] + boxA[1])
+        boxB = (boxB[0], boxB[1], boxB[0] + boxB[2], boxB[3] + boxB[1])
+        # determine the (x, y)-coordinates of the intersection rectangle
+        xA = max(boxA[0], boxB[0])
+        yA = max(boxA[1], boxB[1])
+        xB = min(boxA[2], boxB[2])
+        yB = min(boxA[3], boxB[3])
+        # compute the area of intersection rectangle
+        interArea = max(0, xB - xA + 1) * max(0, yB - yA + 1)
+        # compute the area of both the prediction and ground-truth
+        # rectangles
+        boxAArea = (boxA[2] - boxA[0] + 1) * (boxA[3] - boxA[1] + 1)
+        boxBArea = (boxB[2] - boxB[0] + 1) * (boxB[3] - boxB[1] + 1)
+        # compute the intersection over union by taking the intersection
+        # area and dividing it by the sum of prediction + ground-truth
+        # areas - the interesection area
+        iou = interArea / float(boxAArea + boxBArea - interArea)
+        # return the intersection over union value
+        return iou
+
+    prediction[:] = [x for x in prediction if float(x[1]) > .5]
+
+    boxcombins = combinations(prediction, 2)
+    for boxcomb in boxcombins:
+        xou = bb_intersection_over_union(boxcomb[0][2], boxcomb[1][2])
+        if xou > .7:
+            prediction.remove(boxcomb[1] if boxcomb[0][1] > boxcomb[1][1] else boxcomb[0])
+
+    return prediction
