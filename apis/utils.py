@@ -509,13 +509,12 @@ class YOLO_single_img():
                                              self.dark.network_height(self.netMain), 3)
 
         try:
-            # frame_rgb = cv2.cvtColor(image_src, cv2.COLOR_BGR2RGB)
-            frame_resized = cv2.resize(image_src, self.size, interpolation=cv2.INTER_LINEAR)
+            frame_rgb = cv2.cvtColor(image_src, cv2.COLOR_BGR2RGB)
+            frame_resized = cv2.resize(frame_rgb, self.size, interpolation=cv2.INTER_LINEAR)
             # self.logger.info(frame_resized.shape)
             self.dark.copy_image_from_bytes(darknet_image, frame_resized.tobytes())
             detections = self.dark.detect_image(self.netMain, self.metaMain, darknet_image, thresh=0.25)
-            # self.logger.info(detections)
-            return detections, frame_resized
+            return detections, cv2.cvtColor(frame_resized, cv2.COLOR_RGB2BGR)
         except:
             raise
 
@@ -528,7 +527,7 @@ class YOLO_single_img():
 thirteentimestamp = lambda: int(round(time.time() * 1e3))
 
 
-def kill_duplicate_by_score(prediction):
+def kill_duplicate_by_score(prediction, xou_thres=.7):
     from itertools import combinations
     def bb_intersection_over_union(boxA, boxB):
         boxA = (boxA[0], boxA[1], boxA[0] + boxA[2], boxA[3] + boxA[1])
@@ -555,8 +554,11 @@ def kill_duplicate_by_score(prediction):
 
     boxcombins = combinations(prediction, 2)
     for boxcomb in boxcombins:
-        xou = bb_intersection_over_union(boxcomb[0][2], boxcomb[1][2])
-        if xou > .7:
-            prediction.remove(boxcomb[1] if boxcomb[0][1] > boxcomb[1][1] else boxcomb[0])
+        try:
+            xou = bb_intersection_over_union(boxcomb[0][2], boxcomb[1][2])
+            if xou > float(xou_thres):
+                prediction.remove(boxcomb[1] if boxcomb[0][1] > boxcomb[1][1] else boxcomb[0])
+        except:
+            continue
 
     return prediction

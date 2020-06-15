@@ -17,7 +17,7 @@ import requests
 from detectron2.structures import Instances
 from detectron2.utils import comm
 from fvcore.common.timer import Timer
-
+from fvcore.common.file_io import PathManager
 from utils import (
     setup_logger,
     YOLO_single_img,
@@ -28,9 +28,9 @@ from utils import (
 )
 
 logger = setup_logger(log_level=logging.DEBUG)
-# yoyo = YOLO_single_img(configPath="cfg/chefCap.cfg", weightPath="cfg/chefCap_3000.weights", metaPath="cfg/chefCap.data")
-yoyo = YOLO_single_img(configPath="cfg/chefCap.cfg", weightPath="cfg/chefCap_21000.weights",
+yoyo = YOLO_single_img(configPath="cfg/chefCap.cfg", weightPath="cfg/chefCap_diounms_mosaic_20000.weights",
                        metaPath="cfg/chefCap.data")
+# yoyo = YOLO_single_img(configPath="cfg/chefCap.cfg", weightPath="cfg/chefCap_21000.weights",metaPath="cfg/chefCap.data")
 # yoyo = YOLO_single_img(configPath="cfg/chefCap.cfg", weightPath="cfg/chefCap_12000.weights", metaPath="cfg/chefCap.data")
 # yoyo = YOLO_single_img(configPath="cfg/chefCap.cfg", weightPath="cfg/chefCap_final.weights", metaPath="cfg/chefCap.data")
 API_ENDPOINT = "http://10.1.198.6:5123/querySyncVidelStream"
@@ -93,24 +93,27 @@ def do_detect_upload(rtmpurl: str, analysisType='1|2|3'):
             logger.debug("ret is not...")
             cap.release()
             return None, None
+
         tt = Timer()
         predicts, kitchen_img_resized = yoyo.darkdetect(frame_read)
         # ('uniform', 0.9847872257232666, (226.92221069335938, 266.7281188964844, 87.1346435546875, 198.78860473632812))
         analysisType_predicts = []
+        predicts_killed = kill_duplicate_by_score(predicts)
         for xx in analysisType.split('|'):
             if xx == '1':
-                for yy in predicts:
+                for yy in predicts_killed:
                     if yy[0] in ['face-head', 'face-cap', 'mask-cap']:
                         analysisType_predicts.append(yy)
             elif xx == '2':
-                for yy in predicts:
+                for yy in predicts_killed:
                     if yy[0] in ['face-head', 'mask-cap', 'mask-head']:
                         analysisType_predicts.append(yy)
             elif xx == '3':
-                for yy in predicts:
+                for yy in predicts_killed:
                     if yy[0] in ['non-uniform', 'uniform']:
                         analysisType_predicts.append(yy)
-        predicts = kill_duplicate_by_score(analysisType_predicts)
+        # predicts = kill_duplicate_by_score(analysisType_predicts)
+        predicts = analysisType_predicts
         tt.pause()
         logger.info(f'************** one shot detect time is {tt.seconds()} **************')
         vlz = myx_Visualizer(kitchen_img_resized, {"thing_classes": thing_classes}, instance_mode=1)
@@ -121,13 +124,22 @@ def do_detect_upload(rtmpurl: str, analysisType='1|2|3'):
                                 "pred_classes": np.array([thing_classes.index(x[0]) for x in predicts])})
         vout = vlz.draw_instance_predictions(predictions=instance)
         kitchen_img_resized = vout.get_image()
-        cv2.imwrite(f'imgslogs/{uuid.uuid4().hex}.jpg', kitchen_img_resized)
+
         logger.debug(instance)
         # count += frameRate
         # cap.set(1, count)
         cap.release()
         logger.debug(f'end det {rtmpurl} ...')
-        return predicts, upload(kitchen_img_resized)
+        tempfilename = upload(kitchen_img_resized)
+        if len(tempfilename):
+            cv2.imwrite(f'imgslogs/{tempfilename}', kitchen_img_resized)
+            cv2.imwrite(f'imgslogs/nondetected/{tempfilename[:-4]}_nondetected.jpg', frame_read)
+            with PathManager.open(f'imgslogs/predictions/{tempfilename[:-4]}.txt', 'w') as fid:
+                fid.writelines(predicts)
+        else:
+            cv2.imwrite(f'imgslogs/{uuid.uuid4().hex}.jpg', kitchen_img_resized)
+            cv2.imwrite(f'imgslogs/{uuid.uuid4().hex}_nondetected.jpg', frame_read)
+        return predicts, tempfilename
     except:
         logger.error(traceback.format_exc())
         logger.error(exec)
