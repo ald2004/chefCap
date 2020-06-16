@@ -44,7 +44,7 @@ last_check_table = {"mq289vcee5000015": 600}
 def add_time():
     while True:
         for k, v in last_check_table.items():
-            last_check_table[k] = v + 1
+            last_check_table[k] = (v % 999) + 1
             # print(f'{k}----{last_check_table[k]}')
         time.sleep(1)
 
