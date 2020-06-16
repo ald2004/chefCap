@@ -135,7 +135,7 @@ def do_detect_upload(rtmpurl: str, analysisType='1|2|3'):
             cv2.imwrite(f'imgslogs/{tempfilename}', kitchen_img_resized)
             cv2.imwrite(f'imgslogs/nondetected/{tempfilename[:-4]}_nondetected.jpg', frame_read)
             with PathManager.open(f'imgslogs/predictions/{tempfilename[:-4]}.txt', 'w') as fid:
-                fid.writelines(predicts)
+                fid.writelines(f'{predicts}')
         else:
             cv2.imwrite(f'imgslogs/{uuid.uuid4().hex}.jpg', kitchen_img_resized)
             cv2.imwrite(f'imgslogs/{uuid.uuid4().hex}_nondetected.jpg', frame_read)
@@ -247,18 +247,27 @@ def d():
                                    datetime.strptime(endTime, "%H:%M:%S").hour
             if not (datetime.now(tz=pytz.timezone('Asia/Shanghai')).hour > start_hour and datetime.now(
                     tz=pytz.timezone('Asia/Shanghai')).hour < end_hour):
-                continue
+                logger.debug('sleepy time seeu...')
+                time.sleep(1800)
             else:
-                result_dict = grab_and_analysis(deviceSn, rtmpUrl, frameTime, analysisType=analysisType)
-                if result_dict:
-                    logger.debug(f'+++++++++++++++ {result_dict} +++++++++++++++')
-                    r = requests.post(url=API_ENDPOINT_SEND, json=result_dict)
-                    ret = json.loads(r.text)
-                    logger.info(ret)
-                    if ret["code"] != "A00000":
-                        logger.error("something wrong...")
-                else:
-                    logger.error("grab_and_analysis not work continued!!!")
+                try:
+                    result_dict = grab_and_analysis(deviceSn, rtmpUrl, frameTime, analysisType=analysisType)
+                    if result_dict:
+                        logger.debug(f'+++++++++++++++ {result_dict} +++++++++++++++')
+                        r = requests.post(url=API_ENDPOINT_SEND, json=result_dict)
+                        ret = json.loads(r.text)
+                        logger.info(ret)
+                        if ret["code"] != "A00000":
+                            logger.error("something wrong...")
+                            continue
+                    else:
+                        logger.error("grab_and_analysis not work continued!!!")
+                        continue
+                except:
+                    logger.error(traceback.format_exc())
+                    logger.error(exec)
+                    logger.debug(f'post to {API_ENDPOINT_SEND}  with errors...')
+                    continue
             time.sleep(5)
             logger.debug('done for now...')
         time.sleep(2)
