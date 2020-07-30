@@ -98,7 +98,7 @@ def do_detect_upload(rtmpurl: str, analysisType='1|2|3'):
         predicts, kitchen_img_resized = yoyo.darkdetect(frame_read)
         # ('uniform', 0.9847872257232666, (226.92221069335938, 266.7281188964844, 87.1346435546875, 198.78860473632812))
         analysisType_predicts = []
-        predicts_killed = kill_duplicate_by_score(predicts)
+        predicts_killed = kill_duplicate_by_score(predicts,xou_thres=.65)
         for xx in analysisType.split('|'):
             if xx == '1':
                 for yy in predicts_killed:
@@ -191,7 +191,8 @@ def grab_and_analysis(deviceSn: str, rtmpurl: str, frameTime: str, analysisType=
                             "ymin": f"{i[2][1]}",
                             "xmax": f"{i[2][2]}",
                             "ymax": f"{i[2][3]}",
-                            "flag": "0" if i[0] == ['face-head'] else "1"
+                            "flag": "1" if i[0] == ['mask-cap'] else "0"
+                            # "flag": "0" if i[0] == ['face-head'] else "1"
 
                         })
                     if i[0] in ['face-head', 'mask-cap', 'mask-head']:
@@ -201,7 +202,8 @@ def grab_and_analysis(deviceSn: str, rtmpurl: str, frameTime: str, analysisType=
                             "ymin": f"{i[2][1]}",
                             "xmax": f"{i[2][2]}",
                             "ymax": f"{i[2][3]}",
-                            "flag": "0" if i[0] == ['face-head'] else "1"
+                            "flag": "1" if i[0] == ['mask-cap'] else "0"
+                            #"flag": "0" if i[0] == ['face-head'] else "1"
                         })
                     if i[0] in ['non-uniform', 'uniform']:
                         analysisResult_list_three.append({
