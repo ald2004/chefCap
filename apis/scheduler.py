@@ -98,7 +98,7 @@ def do_detect_upload(rtmpurl: str, analysisType='1|2|3'):
         predicts, kitchen_img_resized = yoyo.darkdetect(frame_read)
         # ('uniform', 0.9847872257232666, (226.92221069335938, 266.7281188964844, 87.1346435546875, 198.78860473632812))
         analysisType_predicts = []
-        predicts_killed = kill_duplicate_by_score(predicts,xou_thres=.65)
+        predicts_killed = kill_duplicate_by_score(predicts, xou_thres=.65)
         for xx in analysisType.split('|'):
             if xx == '1':
                 for yy in predicts_killed:
@@ -169,18 +169,21 @@ def grab_and_analysis(deviceSn: str, rtmpurl: str, frameTime: str, analysisType=
                 analysisResult_list_three = []
                 yy_one = {
                     "analysisType": "1",
-                    "imgUrl": f'http://10.1.198.6:18090/analysisImgs/{uploadedurl}',
+                    "imgUrl": f"http://123.59.26.68:18090/analysisImgs/{uploadedurl}",
+                    # f'http://10.1.198.6:18090/analysisImgs/{uploadedurl}',
                     # http://10.1.198.6:18090/analysisImgs/xxx.jpg?
                     "analysisResult": analysisResult_list_one
                 }
                 yy_two = {
                     "analysisType": "2",
-                    "imgUrl": f'http://10.1.198.6:18090/analysisImgs/{uploadedurl}',
+                    "imgUrl": f"http://123.59.26.68:18090/analysisImgs/{uploadedurl}",
+                    # f'http://10.1.198.6:18090/analysisImgs/{uploadedurl}',
                     "analysisResult": analysisResult_list_two
                 }
                 yy_three = {
                     "analysisType": "3",
-                    "imgUrl": f'http://10.1.198.6:18090/analysisImgs/{uploadedurl}',
+                    "imgUrl": f"http://123.59.26.68:18090/analysisImgs/{uploadedurl}",
+                    # f'http://10.1.198.6:18090/analysisImgs/{uploadedurl}',
                     "analysisResult": analysisResult_list_three
                 }
                 for i in predicts:
@@ -203,7 +206,7 @@ def grab_and_analysis(deviceSn: str, rtmpurl: str, frameTime: str, analysisType=
                             "xmax": f"{i[2][2]}",
                             "ymax": f"{i[2][3]}",
                             "flag": "1" if i[0] == ['mask-cap'] else "0"
-                            #"flag": "0" if i[0] == ['face-head'] else "1"
+                            # "flag": "0" if i[0] == ['face-head'] else "1"
                         })
                     if i[0] in ['non-uniform', 'uniform']:
                         analysisResult_list_three.append({
